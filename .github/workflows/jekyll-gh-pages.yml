@@ -1,51 +1,297 @@
-# Sample workflow for building and deploying a Jekyll site to GitHub Pages
-name: Deploy Jekyll with GitHub Pages dependencies preinstalled
+<!DOCTYPE html>
+<html>
+<head>
+    <title>意汉趣味配对</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.5/xlsx.full.min.js"></script>
+    <style>
+        body {
+            background: linear-gradient(135deg, #FFD3B6 0%, #A8E6CF 100%);
+            display: flex;
+            font-family: 'Comic Sans MS', cursive;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
 
-on:
-  # Runs on pushes targeting the default branch
-  push:
-    branches: ["main"]
+        /* 左侧上传区域 */
+        #uploadSection {
+            width: 250px;
+            padding: 20px;
+            background: rgba(255,255,255,0.9);
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            margin-right: 30px;
+        }
 
-  # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
+        /* 游戏主区域 */
+        #gameContainer {
+            flex: 1;
+            max-width: 1000px;
+            position: relative;
+        }
 
-# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
-permissions:
-  contents: read
-  pages: write
-  id-token: write
+        /* 单词列布局 */
+        .word-column {
+            display: grid;
+            gap: 15px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        #italianWords {
+            grid-template-columns: repeat(3, 1fr);
+            background: rgba(255,178,102,0.2);
+        }
+        #chineseWords {
+            grid-template-columns: repeat(4, 1fr);
+            background: rgba(102,178,255,0.2);
+        }
 
-# Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
-# However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
+        /* 单词卡片样式 */
+        .word-card {
+            padding: 15px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+            font-size: 18px;
+            box-shadow: 0 3px 6px rgba(0,0,0,0.1);
+        }
+        #italianWords .word-card {
+            background: #FFB366;
+        }
+        #chineseWords .word-card {
+            background: #66B3FF;
+        }
+        .selected {
+            transform: scale(1.1);
+            box-shadow: 0 0 15px rgba(255,255,255,0.8);
+        }
+        .wrong {
+            background: #FF6666 !important;
+            animation: shake 0.5s;
+        }
 
-jobs:
-  # Build job
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-      - name: Build with Jekyll
-        uses: actions/jekyll-build-pages@v1
-        with:
-          source: ./
-          destination: ./_site
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        /* 温度计样式 */
+        #thermometer {
+            width: 35px;
+            height: 300px;
+            background: linear-gradient(to top, #FFA500, #FF6B00);
+            border-radius: 20px;
+            position: fixed;
+            right: 50px;
+            top: 100px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        #progress {
+            width: 100%;
+            background: rgba(255,255,255,0.3);
+            transition: height 0.5s ease;
+        }
 
-  # Deployment job
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+        /* 按钮样式 */
+        button {
+            padding: 12px 25px;
+            margin: 10px;
+            border: none;
+            border-radius: 25px;
+            background: #4CAF50;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        @keyframes shake {
+            0% { transform: translateX(0); }
+            25% { transform: translateX(5px); }
+            50% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+            100% { transform: translateX(0); }
+        }
+    </style>
+</head>
+<body>
+    <!-- 左侧上传区 -->
+    <div id="uploadSection">
+        <h2>📁 上传词库</h2>
+        <input type="file" id="excelInput" accept=".xlsx,.xls">
+        <h3>当前词汇：</h3>
+        <div id="wordList"></div>
+    </div>
+
+    <!-- 游戏主界面 -->
+    <div id="gameContainer">
+        <div id="timer">
+            <input type="number" id="timeInput" placeholder="倒计时(秒)" min="1" style="padding: 8px">
+            <div id="countdown" style="font-size: 24px; margin: 10px">⏳ 00:00</div>
+        </div>
+        
+        <button id="startBtn">🚀 开始游戏</button>
+        <button id="resetBtn">🔄 重新开始</button>
+
+        <div id="gameArea">
+            <div class="word-column" id="italianWords"></div>
+            <div class="word-column" id="chineseWords"></div>
+        </div>
+    </div>
+
+    <!-- 温度计 -->
+    <div id="thermometer">
+        <div id="progress" style="height: 0%"></div>
+    </div>
+
+<script>
+let words = [];
+let selected = { it: null, cn: null };
+let timerId = null;
+let timeLeft = 0;
+
+// 文件上传处理
+document.getElementById('excelInput').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    
+    reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, {type: 'array'});
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        words = XLSX.utils.sheet_to_json(sheet, {header: ['italian', 'chinese']});
+        updateWordList();
+        generateWordCards();
+    };
+    reader.readAsArrayBuffer(file);
+});
+
+// 游戏控制
+document.getElementById('startBtn').addEventListener('click', toggleGame);
+document.getElementById('resetBtn').addEventListener('click', resetGame);
+
+function toggleGame() {
+    if (!timerId) {
+        startGame();
+        document.getElementById('startBtn').textContent = '⏸ 暂停';
+    } else {
+        clearInterval(timerId);
+        timerId = null;
+        document.getElementById('startBtn').textContent = '▶️ 继续';
+    }
+}
+
+function startGame() {
+    timeLeft = document.getElementById('timeInput').value || 60;
+    timeLeft = parseInt(timeLeft);
+    updateTimer();
+    
+    timerId = setInterval(() => {
+        timeLeft--;
+        updateTimer();
+        if (timeLeft <= 0) endGame();
+    }, 1000);
+}
+
+// 生成单词卡片
+function generateWordCards() {
+    const shuffled = [...words].sort(() => Math.random() - 0.5);
+    
+    // 意大利语列（3列）
+    document.getElementById('italianWords').innerHTML = shuffled
+        .map(word => `<div class="word-card" data-word="${word.italian}">${word.italian}</div>`)
+        .join('');
+
+    // 中文列（4列）
+    document.getElementById('chineseWords').innerHTML = shuffled
+        .sort(() => Math.random() - 0.5)
+        .map(word => `<div class="word-card" data-word="${word.italian}">${word.chinese}</div>`)
+        .join('');
+
+    // 添加点击事件
+    document.querySelectorAll('.word-card').forEach(card => {
+        card.addEventListener('click', handleClick);
+    });
+}
+
+// 点击处理
+function handleClick(e) {
+    const card = e.target;
+    const isItalian = card.parentElement.id === 'italianWords';
+
+    // 清除已选项
+    document.querySelectorAll(`#${isItalian ? 'italian' : 'chinese'}Words .selected`)
+        .forEach(c => c.classList.remove('selected'));
+
+    // 设置当前选择
+    card.classList.add('selected');
+    isItalian ? selected.it = card : selected.cn = card;
+
+    // 当选择两个单词时验证
+    if (selected.it && selected.cn) {
+        checkMatch();
+    }
+}
+
+// 验证匹配
+function checkMatch() {
+    const isCorrect = words.some(word => 
+        word.italian === selected.it.dataset.word && 
+        word.chinese === selected.cn.textContent
+    );
+
+    if (isCorrect) {
+        // 正确匹配效果
+        [selected.it, selected.cn].forEach(card => {
+            card.style.transition = 'all 0.5s';
+            card.style.opacity = '0';
+            card.style.transform = 'scale(0)';
+            setTimeout(() => card.remove(), 500);
+        });
+        updateProgress();
+    } else {
+        // 错误效果
+        [selected.it, selected.cn].forEach(card => {
+            card.classList.add('wrong');
+            setTimeout(() => card.classList.remove('wrong'), 1000);
+        });
+    }
+    selected = { it: null, cn: null };
+}
+
+// 更新进度条
+function updateProgress() {
+    const remaining = document.querySelectorAll('.word-card').length;
+    const progress = ((words.length*2 - remaining)/2 / words.length * 100).toFixed(1);
+    document.getElementById('progress').style.height = progress + '%';
+}
+
+// 其他功能函数
+function updateTimer() {
+    const minutes = String(Math.floor(timeLeft / 60)).padStart(2, '0');
+    const seconds = String(timeLeft % 60).padStart(2, '0');
+    document.getElementById('countdown').textContent = `⏳ ${minutes}:${seconds}`;
+}
+
+function endGame() {
+    clearInterval(timerId);
+    alert(`时间到！完成度：${document.getElementById('progress').style.height}`);
+}
+
+function resetGame() {
+    clearInterval(timerId);
+    timerId = null;
+    timeLeft = 0;
+    updateTimer();
+    generateWordCards();
+    document.getElementById('progress').style.height = '0%';
+    document.getElementById('startBtn').textContent = '🚀 开始游戏';
+}
+
+function updateWordList() {
+    document.getElementById('wordList').innerHTML = 
+        words.map(w => `<div>🍕 ${w.italian} → 🇨🇳 ${w.chinese}</div>`).join('');
+}
+</script>
+</body>
+</html>
