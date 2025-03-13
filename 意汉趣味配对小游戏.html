@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>意汉趣味配对游戏</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.5/xlsx.full.min.js"></script>
+    <style>
+        /* 基础样式 */
+        body {
+            background: linear-gradient(135deg, #e3dcd2, #c4b9ac);
+            display: flex;
+            font-family: 'Arial Rounded MT Bold';
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            position: relative;
+        }
+
+        /* 日期显示 */
+        #dateDisplay {
+            position: fixed;
+            top: 20px;
+            right: 30px;
+            font-size: 18px;
+            color: #fff;
+            background: rgba(0,0,0,0.3);
+            padding: 8px 15px;
+            border-radius: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            z-index: 1000;
+        }
+
+        /* 上传区域 */
+        #uploadSection {
+            width: 250px;
+            padding: 20px;
+            background: rgba(255,255,255,0.9);
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            margin-right: 30px;
+        }
+
+        /* 游戏主区域 */
+        #gameContainer {
+            flex: 1;
+            max-width: 1000px;
+            position: relative;
+        }
+
+        /* 单词列布局 */
+        .word-column {
+            display: grid;
+            gap: 15px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        #italianWords {
+            grid-template-columns: repeat(3, 1fr);
+            background: rgba(255,178,102,0.2);
+        }
+        #chineseWords {
+            grid-template-columns: repeat(4, 1fr);
+            background: rgba(102,178,255,0.2);
+        }
+
+        /* 单词卡片 */
+        .word-card {
+            padding: 15px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+            font-size: 18px;
+            box-shadow: 0 3px 6px rgba(0,0,0,0.1);
+        }
+        #italianWords .word-card { background: #FFB366; }
+        #chineseWords .word-card { background: #66B3FF; }
+        .selected {
+            transform: scale(1.1);
+            box-shadow: 0 0 15px rgba(255,255,255,0.8);
+        }
+        .wrong {
+            background: #FF6666 !important;
+            animation: shake 0.5s;
+        }
+
+        /* 温度计 */
+        #thermometer {
+            width: 35px;
+            height: 300px;
+            background: linear-gradient(to top, #FFA500, #FF6B00);
+            border-radius: 20px;
+            position: fixed;
+            right: 50px;
+            top: 100px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        #progress {
+            width: 100%;
+            background: rgba(255,255,255,0.3);
+            transition: height 0.5s ease;
+        }
+
+        /* 按钮样式 */
+        button {
+            padding: 12px 25px;
+            margin: 10px;
+            border: none;
+            border-radius: 25px;
+            background: #4CAF50;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        /* 动画效果 */
+        @keyframes shake {
+            0% { transform: translateX(0); }
+            25% { transform: translateX(5px); }
+            50% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+            100% { transform: translateX(0); }
+        }
+        .correct-line {
+            position: absolute;
+            height: 3px;
+            background: #8aa87f;
+            transform-origin: left center;
+            animation: lineFade 1s forwards;
+        }
+        @keyframes lineFade {
+            0% { opacity: 1; }
+            100% { opacity: 0; }
+        }
+        .matched {
+            animation: matchFade 0.8s forwards;
+        }
+        @keyframes matchFade {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); background: #8aa87f; opacity: 0.8; }
+            100% { transform: scale(0); opacity: 0; }
+        }
+    </style>
+</head>
+<body>
+    <div id="dateDisplay"></div>
+
+    <div id="uploadSection">
+        <h2>📁 上传词库</h2>
+        <input type="file" id="excelInput" accept=".xlsx,.xls">
+        <h3>当前词汇：</h3>
+        <div id="wordList"></div>
+    </div>
+
+    <div id="gameContainer">
+        <div id="timer">
+            <input type="number" id="timeInput" placeholder="倒计时(秒)" min="1" style="padding: 8px">
+            <div id="countdown" style="font-size: 24px; margin: 10px">⏳ 00:00</div>
+        </div>
+        
+        <button id="startBtn">🚀 开始游戏</button>
+        <button id="resetBtn">🔄 重新开始</button>
+
+        <div id="gameArea">
+            <div class="word-column" id="italianWords"></div>
+            <div class="word-column" id="chineseWords"></div>
+        </div>
+    </div>
+
+    <div id="thermometer">
+        <div id="progress" style="height: 0%"></div>
+    </div>
+
+<script>
+// 日期显示
+function updateDate() {
+    const today = new Date();
+    document.getElementById('dateDisplay').textContent = today.toLocaleDateString('zh-CN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).replace(/\//g, '-');
+}
+window.addEventListener('DOMContentLoaded', updateDate);
+
+// 游戏逻辑
+let words = [];
+let selected = { it: null, cn: null };
+let timerId = null;
+let timeLeft = 0;
+
+document.getElementById('excelInput').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    
+    reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, {type: 'array'});
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        words = XLSX.utils.sheet_to_json(sheet, {header: ['italian', 'chinese']});
+        updateWordList();
+        generateWordCards();
+    };
+    reader.readAsArrayBuffer(file);
+});
+
+document.getElementById('startBtn').addEventListener('click', toggleGame);
+document.getElementById('resetBtn').addEventListener('click', resetGame);
+
+function toggleGame() {
+    if (!timerId) {
+        startGame();
+        document.getElementById('startBtn').textContent = '⏸ 暂停';
+    } else {
+        clearInterval(timerId);
+        timerId = null;
+        document.getElementById('startBtn').textContent = '▶️ 继续';
+    }
+}
+
+function startGame() {
+    timeLeft = document.getElementById('timeInput').value || 60;
+    timeLeft = parseInt(timeLeft);
+    updateTimer();
+    
+    timerId = setInterval(() => {
+        timeLeft--;
+        updateTimer();
+        if (timeLeft <= 0) endGame();
+    }, 1000);
+}
+
+function generateWordCards() {
+    const shuffled = [...words].sort(() => Math.random() - 0.5);
+    
+    document.getElementById('italianWords').innerHTML = shuffled
+        .map(word => `<div class="word-card" data-word="${word.italian}">${word.italian}</div>`)
+        .join('');
+
+    document.getElementById('chineseWords').innerHTML = shuffled
+        .sort(() => Math.random() - 0.5)
+        .map(word => `<div class="word-card" data-word="${word.italian}">${word.chinese}</div>`)
+        .join('');
+
+    document.querySelectorAll('.word-card').forEach(card => {
+        card.addEventListener('click', handleClick);
+    });
+}
+
+function handleClick(e) {
+    const card = e.target;
+    const isItalian = card.parentElement.id === 'italianWords';
+
+    document.querySelectorAll(`#${isItalian ? 'italian' : 'chinese'}Words .selected`)
+        .forEach(c => c.classList.remove('selected'));
+
+    card.classList.add('selected');
+    isItalian ? selected.it = card : selected.cn = card;
+
+    if (selected.it && selected.cn) checkMatch();
+}
+
+function checkMatch() {
+    const isCorrect = words.some(word => 
+        word.italian === selected.it.dataset.word && 
+        word.chinese === selected.cn.textContent
+    );
+
+    if (isCorrect) {
+        const line = document.createElement('div');
+        line.className = 'correct-line';
+        const itRect = selected.it.getBoundingClientRect();
+        const cnRect = selected.cn.getBoundingClientRect();
+        
+        const dx = cnRect.left - itRect.right;
+        const dy = (cnRect.top + cnRect.height/2) - (itRect.top + itRect.height/2);
+        const length = Math.sqrt(dx*dx + dy*dy);
+        const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+        
+        line.style.width = `${length}px`;
+        line.style.left = `${itRect.right}px`;
+        line.style.top = `${itRect.top + itRect.height/2}px`;
+        line.style.transform = `rotate(${angle}deg)`;
+        document.body.appendChild(line);
+
+        [selected.it, selected.cn].forEach(card => {
+            card.classList.add('matched');
+            card.style.pointerEvents = 'none';
+        });
+
+        setTimeout(() => {
+            line.remove();
+            [selected.it, selected.cn].forEach(card => card.remove());
+            updateProgress();
+        }, 800);
+    } else {
+        [selected.it, selected.cn].forEach(card => {
+            card.classList.add('wrong');
+            setTimeout(() => card.classList.remove('wrong'), 1000);
+        });
+    }
+    selected = { it: null, cn: null };
+}
+
+function updateProgress() {
+    const remaining = document.querySelectorAll('.word-card').length;
+    const progress = ((words.length*2 - remaining)/2 / words.length * 100).toFixed(1);
+    document.getElementById('progress').style.height = progress + '%';
+}
+
+function updateTimer() {
+    const minutes = String(Math.floor(timeLeft / 60)).padStart(2, '0');
+    const seconds = String(timeLeft % 60).padStart(2, '0');
+    document.getElementById('countdown').textContent = `⏳ ${minutes}:${seconds}`;
+}
+
+function endGame() {
+    clearInterval(timerId);
+    alert(`时间到！完成度：${document.getElementById('progress').style.height}`);
+}
+
+function resetGame() {
+    clearInterval(timerId);
+    timerId = null;
+    timeLeft = 0;
+    updateTimer();
+    generateWordCards();
+    document.getElementById('progress').style.height = '0%';
+    document.getElementById('startBtn').textContent = '🚀 开始游戏';
+}
+
+function updateWordList() {
+    document.getElementById('wordList').innerHTML = 
+        words.map(w => `<div>🍕 ${w.italian} → 🇨🇳 ${w.chinese}</div>`).join('');
+}
+</script>
+</body>
+</html>
